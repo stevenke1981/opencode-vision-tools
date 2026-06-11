@@ -55,8 +55,18 @@ Restart OpenCode after install.
 | Path | Purpose |
 |------|---------|
 | `~/.config/opencode-vision-tools/` | Project source (git clone) |
-| `~/.config/opencode/plugins/` | Plugin files OpenCode loads |
+| `~/.config/opencode/plugins/opencode-vision-tools/index.ts` | Plugin entrypoint |
+| `~/.config/opencode/plugins/opencode-vision-tools/` | Helper modules + `vision-windows.ps1` |
 | `~/.config/opencode/commands/` | Slash commands |
+
+### OpenCode loading note
+
+OpenCode auto-loads files directly under `~/.config/opencode/plugins/`.
+Only plugin entrypoints should be registered or placed where OpenCode treats
+them as plugins. This installer keeps helper files in
+`plugins/opencode-vision-tools/` next to `index.ts`, so files like
+`opencode-vision-tools-runner.ts` and `opencode-vision-tools-guidance.ts` are
+imported by the entrypoint instead of being misloaded as standalone plugins.
 
 **Windows:** use `install.ps1` or `node scripts/install-global.mjs` — do **not** run `ls`/`dir` inside OpenCode before install (TUI can garble ANSI output and look stuck).
 
@@ -249,6 +259,7 @@ If `@opencode-ai/plugin` is already in `~/.config/opencode/node_modules`, use `-
 - Use `visionFindWindow` to get PID/bounds before `visionCaptureWindow`
 - Do not use raw `powershell` screenshot one-liners when vision* tools exist
 - Pair with [opencode-agent-browser](https://github.com/stevenke1981/opencode-agent-browser) for full desktop + web coverage
+- Keep helper modules under `plugins/opencode-vision-tools/`; do not copy them into the plugins root
 
 <!-- END_AGENT_README -->
 
