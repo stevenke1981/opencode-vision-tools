@@ -1,0 +1,16 @@
+{
+  "name": "opencode-vision-tools",
+  "version": "1.0.0",
+  "description": "OpenCode eyes: desktop screenshot, window/app locate — inspired by Codex and Claude computer use",
+  "type": "module",
+  "main": "src/index.ts",
+  "files": ["src", "commands", "scripts"],
+  "keywords": ["opencode", "opencode-plugin", "screenshot", "vision", "desktop"],
+  "license": "MIT",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "scripts": {
+    "install:global": "node scripts/install-global.mjs"
+  }
+}
