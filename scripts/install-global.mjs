@@ -6,6 +6,9 @@ import os from "node:os";
 
 const PLUGIN_NAME = "opencode-vision-tools";
 const PLUGIN_FILE = `${PLUGIN_NAME}.ts`;
+const PLUGIN_DEP = "@opencode-ai/plugin";
+const PLUGIN_VERSION = "1.16.2";
+const NPM_TIMEOUT_MS = 300_000;
 const ROOT = path.resolve(import.meta.dirname, "..");
 const HOME = os.homedir();
 const CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR
@@ -21,6 +24,8 @@ const SUPPORT_FILES = [
   "opencode-vision-tools-guidance.ts",
   "vision-windows.ps1",
 ];
+
+const skipNpm = process.argv.includes("--skip-npm");
 
 function toConfigPath(absPath) {
   const normalized = absPath.replace(/\\/g, "/");
@@ -42,26 +47,57 @@ async function exists(p) {
   }
 }
 
+function runNpm(args) {
+  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  console.log(`> ${npm} ${args.join(" ")}`);
+  const result = spawnSync(npm, args, {
+    cwd: CONFIG_DIR,
+    stdio: "inherit",
+    shell: false,
+    timeout: NPM_TIMEOUT_MS,
+    env: { ...process.env, npm_config_progress: "true" },
+  });
+  if (result.error) {
+    throw new Error(result.error.message);
+  }
+  if (result.status !== 0) {
+    throw new Error(`npm exited with code ${result.status ?? "unknown"}`);
+  }
+}
+
 async function ensurePackageJson() {
+  if (skipNpm) {
+    console.log("Skipping npm (--skip-npm).");
+    return;
+  }
+
+  const pluginModule = path.join(CONFIG_DIR, "node_modules", PLUGIN_DEP);
+  if (await exists(pluginModule)) {
+    console.log(`${PLUGIN_DEP} already installed — skipping npm.`);
+    return;
+  }
+
   const pkgFile = path.join(CONFIG_DIR, "package.json");
   let pkg = { dependencies: {} };
-  let changed = false;
   if (await exists(pkgFile)) {
     pkg = JSON.parse(await fs.readFile(pkgFile, "utf8"));
     pkg.dependencies = pkg.dependencies ?? {};
   }
-  if (!pkg.dependencies["@opencode-ai/plugin"]) {
-    pkg.dependencies["@opencode-ai/plugin"] = "1.16.2";
-    changed = true;
-  }
-  if (changed || !(await exists(path.join(CONFIG_DIR, "node_modules", "@opencode-ai", "plugin")))) {
+  if (!pkg.dependencies[PLUGIN_DEP]) {
+    pkg.dependencies[PLUGIN_DEP] = PLUGIN_VERSION;
+    await fs.mkdir(CONFIG_DIR, { recursive: true });
     await fs.writeFile(pkgFile, JSON.stringify(pkg, null, 2) + "\n", "utf8");
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    spawnSync(npm, ["install", "--prefix", CONFIG_DIR], {
-      stdio: "inherit",
-      shell: process.platform === "win32",
-    });
   }
+
+  console.log(`Installing ${PLUGIN_DEP}@${PLUGIN_VERSION} only (not full opencode config deps)...`);
+  runNpm([
+    "install",
+    `${PLUGIN_DEP}@${PLUGIN_VERSION}`,
+    "--no-fund",
+    "--no-audit",
+    "--prefer-offline",
+  ]);
+  console.log(`${PLUGIN_DEP} installed.`);
 }
 
 async function registerInConfig(pluginEntry) {
@@ -83,20 +119,34 @@ async function registerInConfig(pluginEntry) {
     );
     return;
   }
+
   const raw = await fs.readFile(configFile, "utf8");
-  if (raw.includes(PLUGIN_NAME)) return;
-  const pluginLine = `    "${pluginEntry}"`;
-  const updated = /"plugin"\s*:\s*\[/.test(raw)
-    ? raw.replace(/("plugin"\s*:\s*\[)([\s\S]*?)(\])/m, (_m, open, inner, close) => {
-        const sep = inner.trim() ? ",\n" : "\n";
-        return `${open}${inner.replace(/\s*,\s*$/, "")}${sep}${pluginLine}\n  ${close}`;
-      })
-    : raw.replace(/\{/, `{\n  "plugin": [\n${pluginLine}\n  ],`);
-  await fs.writeFile(configFile, updated, "utf8");
+  if (raw.includes(PLUGIN_NAME)) {
+    console.log(`Plugin already registered in ${configFile}`);
+    return;
+  }
+
+  let config;
+  try {
+    const stripped = raw.replace(/\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1");
+    config = JSON.parse(stripped);
+  } catch {
+    throw new Error(
+      `Could not parse ${configFile}. Add manually to "plugin": ["${pluginEntry}"]`,
+    );
+  }
+
+  config.plugin = Array.isArray(config.plugin) ? config.plugin : [];
+  if (!config.plugin.includes(pluginEntry)) {
+    config.plugin.push(pluginEntry);
+  }
+  await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
+  console.log(`Registered plugin in ${configFile}`);
 }
 
 async function main() {
   console.log(`Installing ${PLUGIN_NAME}...`);
+  console.log(`Config dir: ${CONFIG_DIR}`);
   await fs.mkdir(PLUGINS_DIR, { recursive: true });
   await fs.mkdir(COMMANDS_DIR, { recursive: true });
 

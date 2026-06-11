@@ -45,6 +45,14 @@ bash install.sh
 
 Restart OpenCode after install.
 
+**Windows:** use `install.ps1` or `node scripts/install-global.mjs` — do **not** run `ls`/`dir` inside OpenCode before install (TUI can garble ANSI output and look stuck).
+
+**Fast reinstall** (files only, skip npm):
+
+```bash
+node scripts/install-global.mjs --skip-npm
+```
+
 ### Verify
 
 ```bash
@@ -99,6 +107,15 @@ Windows uses `vision-windows.ps1` (richest support).
 - [opencode-agent-browser](https://github.com/stevenke1981/opencode-agent-browser) — web pages
 - [opencode-git-tools](https://github.com/stevenke1981/opencode-git-tools) — Git operations
 - [opencode-agent-memory-tools](https://github.com/stevenke1981/opencode-agent-memory-tools-) — persistent memory
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Installer appears stuck for minutes | Old installer ran full `npm install` on entire `~/.config/opencode` (superpowers, transformers, etc.) | Update repo; installer now installs only `@opencode-ai/plugin` |
+| Garbled `‹\|38;2;...` text in OpenCode | `bashExec` + `ls -la` ANSI codes in TUI | Skip listing; run `node scripts/install-global.mjs` directly |
+| `vision-windows.ps1 not found` | Plugin files not copied | Re-run installer |
+| npm timeout | Slow network | Retry, or `--skip-npm` if `@opencode-ai/plugin` already exists |
 
 ### License
 
@@ -201,6 +218,16 @@ When user says "screenshot my screen" or "screenshot VS Code" → **vision\***.
 2. **Intent detection** — full guide on screenshot/desktop/螢幕 keywords
 3. **session.compacting** — workflow survives context compression
 4. **`/vision-guide`** — user can force-load this guide
+
+### Install (agents)
+
+On Windows, install with **one command** — do not run exploratory `ls`/`dir` first:
+
+```bash
+cd /d/opencode-vision-tools && node scripts/install-global.mjs
+```
+
+If `@opencode-ai/plugin` is already in `~/.config/opencode/node_modules`, use `--skip-npm` for instant copy-only install.
 
 ### Rules
 
