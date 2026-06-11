@@ -11,12 +11,16 @@ const PLUGIN_VERSION = "1.16.2";
 const NPM_TIMEOUT_MS = 300_000;
 const ROOT = path.resolve(import.meta.dirname, "..");
 const HOME = os.homedir();
-const CONFIG_DIR = process.env.OPENCODE_CONFIG_DIR
+const GLOBAL_CONFIG = path.join(HOME, ".config");
+const OPENCODE_DIR = process.env.OPENCODE_CONFIG_DIR
   ? path.resolve(process.env.OPENCODE_CONFIG_DIR.replace(/^~/, HOME))
-  : path.join(HOME, ".config", "opencode");
+  : path.join(GLOBAL_CONFIG, "opencode");
+const INSTALL_DIR = process.env.INSTALL_DIR
+  ? path.resolve(process.env.INSTALL_DIR.replace(/^~/, HOME))
+  : path.join(GLOBAL_CONFIG, PLUGIN_NAME);
 
-const PLUGINS_DIR = path.join(CONFIG_DIR, "plugins");
-const COMMANDS_DIR = path.join(CONFIG_DIR, "commands");
+const PLUGINS_DIR = path.join(OPENCODE_DIR, "plugins");
+const COMMANDS_DIR = path.join(OPENCODE_DIR, "commands");
 const TARGET_PLUGIN = path.join(PLUGINS_DIR, PLUGIN_FILE);
 
 const SUPPORT_FILES = [
@@ -24,6 +28,8 @@ const SUPPORT_FILES = [
   "opencode-vision-tools-guidance.ts",
   "vision-windows.ps1",
 ];
+
+const SYNC_ITEMS = ["src", "commands", "scripts", "package.json", "install.ps1", "install.sh", "README.md", "LICENSE", "opencode.json.example"];
 
 const skipNpm = process.argv.includes("--skip-npm");
 
@@ -47,22 +53,52 @@ async function exists(p) {
   }
 }
 
-function runNpm(args) {
+async function copyTree(src, dest) {
+  await fs.mkdir(dest, { recursive: true });
+  for (const entry of await fs.readdir(src, { withFileTypes: true })) {
+    const from = path.join(src, entry.name);
+    const to = path.join(dest, entry.name);
+    if (entry.isDirectory()) {
+      await copyTree(from, to);
+    } else {
+      await fs.copyFile(from, to);
+    }
+  }
+}
+
+async function syncToGlobalInstallDir() {
+  if (path.resolve(ROOT) === path.resolve(INSTALL_DIR)) {
+    return INSTALL_DIR;
+  }
+  await fs.mkdir(INSTALL_DIR, { recursive: true });
+  for (const item of SYNC_ITEMS) {
+    const src = path.join(ROOT, item);
+    if (!(await exists(src))) continue;
+    const dest = path.join(INSTALL_DIR, item);
+    const stat = await fs.stat(src);
+    if (stat.isDirectory()) {
+      await fs.rm(dest, { recursive: true, force: true }).catch(() => {});
+      await copyTree(src, dest);
+    } else {
+      await fs.copyFile(src, dest);
+    }
+  }
+  console.log(`Global install dir -> ${INSTALL_DIR}`);
+  return INSTALL_DIR;
+}
+
+function runNpm(args, cwd) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   console.log(`> ${npm} ${args.join(" ")}`);
   const result = spawnSync(npm, args, {
-    cwd: CONFIG_DIR,
+    cwd,
     stdio: "inherit",
-    shell: false,
+    shell: process.platform === "win32",
     timeout: NPM_TIMEOUT_MS,
     env: { ...process.env, npm_config_progress: "true" },
   });
-  if (result.error) {
-    throw new Error(result.error.message);
-  }
-  if (result.status !== 0) {
-    throw new Error(`npm exited with code ${result.status ?? "unknown"}`);
-  }
+  if (result.error) throw new Error(result.error.message);
+  if (result.status !== 0) throw new Error(`npm exited with code ${result.status ?? "unknown"}`);
 }
 
 async function ensurePackageJson() {
@@ -71,13 +107,13 @@ async function ensurePackageJson() {
     return;
   }
 
-  const pluginModule = path.join(CONFIG_DIR, "node_modules", PLUGIN_DEP);
+  const pluginModule = path.join(OPENCODE_DIR, "node_modules", PLUGIN_DEP);
   if (await exists(pluginModule)) {
     console.log(`${PLUGIN_DEP} already installed — skipping npm.`);
     return;
   }
 
-  const pkgFile = path.join(CONFIG_DIR, "package.json");
+  const pkgFile = path.join(OPENCODE_DIR, "package.json");
   let pkg = { dependencies: {} };
   if (await exists(pkgFile)) {
     pkg = JSON.parse(await fs.readFile(pkgFile, "utf8"));
@@ -85,18 +121,12 @@ async function ensurePackageJson() {
   }
   if (!pkg.dependencies[PLUGIN_DEP]) {
     pkg.dependencies[PLUGIN_DEP] = PLUGIN_VERSION;
-    await fs.mkdir(CONFIG_DIR, { recursive: true });
+    await fs.mkdir(OPENCODE_DIR, { recursive: true });
     await fs.writeFile(pkgFile, JSON.stringify(pkg, null, 2) + "\n", "utf8");
   }
 
-  console.log(`Installing ${PLUGIN_DEP}@${PLUGIN_VERSION} only (not full opencode config deps)...`);
-  runNpm([
-    "install",
-    `${PLUGIN_DEP}@${PLUGIN_VERSION}`,
-    "--no-fund",
-    "--no-audit",
-    "--prefer-offline",
-  ]);
+  console.log(`Installing ${PLUGIN_DEP}@${PLUGIN_VERSION} only...`);
+  runNpm(["install", `${PLUGIN_DEP}@${PLUGIN_VERSION}`, "--no-fund", "--no-audit", "--prefer-offline"], OPENCODE_DIR);
   console.log(`${PLUGIN_DEP} installed.`);
 }
 
@@ -104,14 +134,14 @@ async function registerInConfig(pluginEntry) {
   const candidates = ["opencode.jsonc", "opencode.json"];
   let configFile = null;
   for (const name of candidates) {
-    const p = path.join(CONFIG_DIR, name);
+    const p = path.join(OPENCODE_DIR, name);
     if (await exists(p)) {
       configFile = p;
       break;
     }
   }
   if (!configFile) {
-    configFile = path.join(CONFIG_DIR, "opencode.jsonc");
+    configFile = path.join(OPENCODE_DIR, "opencode.jsonc");
     await fs.writeFile(
       configFile,
       JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [pluginEntry] }, null, 2) + "\n",
@@ -128,40 +158,37 @@ async function registerInConfig(pluginEntry) {
 
   let config;
   try {
-    const stripped = raw.replace(/\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1");
+    const stripped = raw.replace(/^\s*\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1");
     config = JSON.parse(stripped);
   } catch {
-    throw new Error(
-      `Could not parse ${configFile}. Add manually to "plugin": ["${pluginEntry}"]`,
-    );
+    throw new Error(`Could not parse ${configFile}. Add manually to "plugin": ["${pluginEntry}"]`);
   }
 
   config.plugin = Array.isArray(config.plugin) ? config.plugin : [];
-  if (!config.plugin.includes(pluginEntry)) {
-    config.plugin.push(pluginEntry);
-  }
+  if (!config.plugin.includes(pluginEntry)) config.plugin.push(pluginEntry);
   await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
   console.log(`Registered plugin in ${configFile}`);
 }
 
 async function main() {
-  console.log(`Installing ${PLUGIN_NAME}...`);
-  console.log(`Config dir: ${CONFIG_DIR}`);
+  console.log(`Installing ${PLUGIN_NAME} globally...`);
+  const sourceDir = await syncToGlobalInstallDir();
+  console.log(`OpenCode config: ${OPENCODE_DIR}`);
   await fs.mkdir(PLUGINS_DIR, { recursive: true });
   await fs.mkdir(COMMANDS_DIR, { recursive: true });
 
-  await fs.copyFile(path.join(ROOT, "src", "index.ts"), TARGET_PLUGIN);
+  await fs.copyFile(path.join(sourceDir, "src", "index.ts"), TARGET_PLUGIN);
   console.log(`Plugin -> ${TARGET_PLUGIN}`);
 
   for (const file of SUPPORT_FILES) {
     const dest = path.join(PLUGINS_DIR, file);
-    await fs.copyFile(path.join(ROOT, "src", file), dest);
+    await fs.copyFile(path.join(sourceDir, "src", file), dest);
     console.log(`Module -> ${dest}`);
   }
 
-  for (const file of await fs.readdir(path.join(ROOT, "commands"))) {
+  for (const file of await fs.readdir(path.join(sourceDir, "commands"))) {
     const dest = path.join(COMMANDS_DIR, file);
-    await fs.copyFile(path.join(ROOT, "commands", file), dest);
+    await fs.copyFile(path.join(sourceDir, "commands", file), dest);
     console.log(`Command -> ${dest}`);
   }
 
@@ -169,6 +196,7 @@ async function main() {
   await registerInConfig(toConfigPath(TARGET_PLUGIN));
 
   console.log("\nDone! Restart OpenCode.");
+  console.log(`Global project: ${INSTALL_DIR}`);
   console.log("Tools: visionDoctor, visionDescribe, visionListWindows, visionFindWindow, visionFocusWindow, visionLocateApp, visionCaptureScreen, visionCaptureWindow, visionCaptureRegion, visionScreenInfo");
   console.log("Commands: /vision-guide, /vision-screenshot, /vision-find-app");
 }

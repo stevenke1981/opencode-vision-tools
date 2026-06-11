@@ -23,17 +23,16 @@ Gives OpenCode **desktop vision**:
 - **Focus** — bring a window to the foreground before capture
 - **LLM guidance** — plugin tells the agent when to use vision vs browser tools
 
-### Install
+### Install (global, `~/.config`)
 
-```bash
-git clone https://github.com/stevenke1981/opencode-vision-tools.git
-cd opencode-vision-tools
-```
+One command clones/updates to `~/.config/opencode-vision-tools` and registers the plugin in `~/.config/opencode/` for all projects.
 
 **Windows (PowerShell):**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File install.ps1
+# or from any clone:
+irm https://raw.githubusercontent.com/stevenke1981/opencode-vision-tools/main/install.ps1 | iex
 ```
 
 **macOS / Linux:**
@@ -43,7 +42,21 @@ bash install.sh
 # Linux optional: sudo apt install scrot wmctrl
 ```
 
+**Manual:**
+
+```bash
+git clone https://github.com/stevenke1981/opencode-vision-tools.git ~/.config/opencode-vision-tools
+cd ~/.config/opencode-vision-tools
+node scripts/install-global.mjs
+```
+
 Restart OpenCode after install.
+
+| Path | Purpose |
+|------|---------|
+| `~/.config/opencode-vision-tools/` | Project source (git clone) |
+| `~/.config/opencode/plugins/` | Plugin files OpenCode loads |
+| `~/.config/opencode/commands/` | Slash commands |
 
 **Windows:** use `install.ps1` or `node scripts/install-global.mjs` — do **not** run `ls`/`dir` inside OpenCode before install (TUI can garble ANSI output and look stuck).
 
@@ -221,10 +234,11 @@ When user says "screenshot my screen" or "screenshot VS Code" → **vision\***.
 
 ### Install (agents)
 
-On Windows, install with **one command** — do not run exploratory `ls`/`dir` first:
+On Windows, install with **one command** to the global path — do not run exploratory `ls`/`dir` first:
 
 ```bash
-cd /d/opencode-vision-tools && node scripts/install-global.mjs
+node ~/.config/opencode-vision-tools/scripts/install-global.mjs
+# or first-time: powershell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 If `@opencode-ai/plugin` is already in `~/.config/opencode/node_modules`, use `--skip-npm` for instant copy-only install.
