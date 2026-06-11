@@ -21,13 +21,15 @@ const INSTALL_DIR = process.env.INSTALL_DIR
 
 const PLUGINS_DIR = path.join(OPENCODE_DIR, "plugins");
 const COMMANDS_DIR = path.join(OPENCODE_DIR, "commands");
-const TARGET_PLUGIN = path.join(PLUGINS_DIR, PLUGIN_FILE);
+const TARGET_PLUGIN_DIR = path.join(PLUGINS_DIR, PLUGIN_NAME);
+const TARGET_PLUGIN = path.join(TARGET_PLUGIN_DIR, "index.ts");
 
 const SUPPORT_FILES = [
   "opencode-vision-tools-runner.ts",
   "opencode-vision-tools-guidance.ts",
   "vision-windows.ps1",
 ];
+const OLD_ROOT_FILES = [PLUGIN_FILE, ...SUPPORT_FILES];
 
 const SYNC_ITEMS = ["src", "commands", "scripts", "package.json", "install.ps1", "install.sh", "README.md", "LICENSE", "opencode.json.example"];
 
@@ -151,11 +153,6 @@ async function registerInConfig(pluginEntry) {
   }
 
   const raw = await fs.readFile(configFile, "utf8");
-  if (raw.includes(PLUGIN_NAME)) {
-    console.log(`Plugin already registered in ${configFile}`);
-    return;
-  }
-
   let config;
   try {
     const stripped = raw.replace(/^\s*\/\/.*$/gm, "").replace(/,\s*([}\]])/g, "$1");
@@ -165,7 +162,10 @@ async function registerInConfig(pluginEntry) {
   }
 
   config.plugin = Array.isArray(config.plugin) ? config.plugin : [];
-  if (!config.plugin.includes(pluginEntry)) config.plugin.push(pluginEntry);
+  config.plugin = config.plugin.filter(
+    (p) => typeof p !== "string" || !p.includes(PLUGIN_NAME),
+  );
+  config.plugin.push(pluginEntry);
   await fs.writeFile(configFile, JSON.stringify(config, null, 2) + "\n", "utf8");
   console.log(`Registered plugin in ${configFile}`);
 }
@@ -175,15 +175,17 @@ async function main() {
   const sourceDir = await syncToGlobalInstallDir();
   console.log(`OpenCode config: ${OPENCODE_DIR}`);
   await fs.mkdir(PLUGINS_DIR, { recursive: true });
+  await fs.mkdir(TARGET_PLUGIN_DIR, { recursive: true });
   await fs.mkdir(COMMANDS_DIR, { recursive: true });
 
-  await fs.copyFile(path.join(sourceDir, "src", "index.ts"), TARGET_PLUGIN);
-  console.log(`Plugin -> ${TARGET_PLUGIN}`);
+  for (const file of OLD_ROOT_FILES) {
+    await fs.rm(path.join(PLUGINS_DIR, file), { force: true });
+  }
 
-  for (const file of SUPPORT_FILES) {
-    const dest = path.join(PLUGINS_DIR, file);
+  for (const file of await fs.readdir(path.join(sourceDir, "src"))) {
+    const dest = path.join(TARGET_PLUGIN_DIR, file);
     await fs.copyFile(path.join(sourceDir, "src", file), dest);
-    console.log(`Module -> ${dest}`);
+    console.log(`${file === "index.ts" ? "Plugin" : "Module"} -> ${dest}`);
   }
 
   for (const file of await fs.readdir(path.join(sourceDir, "commands"))) {
@@ -197,6 +199,7 @@ async function main() {
 
   console.log("\nDone! Restart OpenCode.");
   console.log(`Global project: ${INSTALL_DIR}`);
+  console.log(`Plugin entry: ${toConfigPath(TARGET_PLUGIN)}`);
   console.log("Tools: visionDoctor, visionDescribe, visionListWindows, visionFindWindow, visionFocusWindow, visionLocateApp, visionCaptureScreen, visionCaptureWindow, visionCaptureRegion, visionScreenInfo");
   console.log("Commands: /vision-guide, /vision-screenshot, /vision-find-app");
 }
