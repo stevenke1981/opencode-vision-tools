@@ -1,6 +1,10 @@
 {
   "name": "opencode-vision-tools",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stevenke1981/opencode-vision-tools.git"
+  },
   "description": "OpenCode eyes: desktop screenshot, window/app locate — inspired by Codex and Claude computer use",
   "type": "module",
   "main": "src/index.ts",
